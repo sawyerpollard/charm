@@ -574,7 +574,9 @@ fn list_states() -> Vec<(String, AppState)> {
 // --- docker helpers -------------------------------------------------------
 
 fn run_dockerfile(app: &str, ip: &str, image: &str) -> Result<()> {
-    run(
+    // run_quiet (not run): start/restart may recreate the container, and this
+    // must stay silent so it's safe to call from the TUI.
+    run_quiet(
         "docker",
         &[
             "run", "-d",
@@ -618,11 +620,14 @@ fn run(bin: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Like `run`, but suppress stdout (e.g. the container id docker echoes back).
+/// Like `run`, but silent: both stdout and stderr are discarded. Lifecycle
+/// actions use this so nothing (e.g. `docker compose`'s progress on stderr)
+/// leaks onto the terminal — which would corrupt the TUI that calls them.
 fn run_quiet(bin: &str, args: &[&str]) -> Result<()> {
     let status = Command::new(bin)
         .args(args)
         .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .with_context(|| format!("running `{bin}`"))?;
     if !status.success() {

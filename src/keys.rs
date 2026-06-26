@@ -11,7 +11,7 @@ use crate::util;
 
 fn forced_command_line(key: &str) -> String {
     format!(
-        "command=\"{} shell\",no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwarding {}",
+        "command=\"{} shell\",no-agent-forwarding,no-port-forwarding,no-X11-forwarding {}",
         paths::BIN,
         key.trim()
     )

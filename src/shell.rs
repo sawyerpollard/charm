@@ -20,7 +20,8 @@ const ALLOWED: [&str; 3] = ["git-receive-pack", "git-upload-pack", "git-upload-a
 pub fn run() -> Result<()> {
     let original = std::env::var("SSH_ORIGINAL_COMMAND").unwrap_or_default();
     if original.is_empty() {
-        bail!("charm: interactive access is disabled; this account only accepts git pushes");
+        // An interactive SSH session (no git command) opens the console.
+        return crate::tui::run();
     }
 
     let parts = shell_words::split(&original).context("parsing SSH_ORIGINAL_COMMAND")?;

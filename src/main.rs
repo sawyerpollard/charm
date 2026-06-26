@@ -8,6 +8,7 @@ mod keys;
 mod paths;
 mod shell;
 mod style;
+mod tui;
 mod uninstall;
 mod util;
 
@@ -125,6 +126,9 @@ enum Command {
         app: String,
     },
 
+    /// Open the management console (also shown on `ssh charm@<host>`).
+    Tui,
+
     /// Check host prerequisites (git, systemd, Docker, Caddy admin API).
     Doctor,
 }
@@ -179,6 +183,7 @@ fn main() -> anyhow::Result<()> {
         Command::List => cli::list()?,
         Command::Status { app } => cli::status(&app)?,
         Command::Logs { app } => cli::logs(&app)?,
+        Command::Tui => tui::run()?,
         Command::Doctor => doctor::run()?,
     }
     Ok(())

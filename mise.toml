@@ -103,6 +103,14 @@ GIT_SSH_COMMAND="ssh -i $CHARM_KEY -o StrictHostKeyChecking=no -o UserKnownHosts
 rm -rf "$tmp"
 '''
 
+[tasks.console]
+description = "Open the charm TUI over SSH (forced command -> charm shell -> tui)"
+run = '''
+port=$(awk '/^[[:space:]]*Port /{print $2; exit}' "$HOME/.lima/$CHARM_VM/ssh.config")
+ssh -tt -i "$CHARM_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -p "$port" charm@127.0.0.1
+'''
+
 [tasks.reset]
 description = "Fresh VM + install from scratch"
 run = "mise run vm-destroy || true; mise run vm-up && mise run install"

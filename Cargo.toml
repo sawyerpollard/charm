@@ -13,6 +13,8 @@ serde_json = "1"
 toml = "0.8"
 # HTTP + JSON only (no TLS stack) - talks to Caddy's admin API on localhost.
 ureq = { version = "2", default-features = false, features = ["json"] }
+# TUI (bundles crossterm; both pure Rust, so the musl build stays clean).
+ratatui = "0.29"
 
 [profile.release]
 strip = true
