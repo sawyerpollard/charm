@@ -22,7 +22,8 @@ pub fn registered() -> Vec<String> {
         .collect()
 }
 
-pub fn add(domain: &str) -> Result<()> {
+/// Register a domain. Returns true if newly added, false if already present.
+pub fn add(domain: &str) -> Result<bool> {
     util::require_root()?;
     let domain = domain.trim().to_ascii_lowercase();
     if !looks_like_domain(&domain) {
@@ -30,33 +31,23 @@ pub fn add(domain: &str) -> Result<()> {
     }
     let mut list = registered();
     if list.contains(&domain) {
-        println!("already registered: {domain}");
-        return Ok(());
+        return Ok(false);
     }
-    list.push(domain.clone());
+    list.push(domain);
     write(&list)?;
-    println!("registered domain: {domain}");
-    Ok(())
+    Ok(true)
 }
 
-pub fn list() -> Result<()> {
-    let content = match fs::read_to_string(file()) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+/// Registered domains as data (errors only on a real read failure).
+pub fn entries() -> Result<Vec<String>> {
+    match fs::read_to_string(file()) {
+        Ok(c) => Ok(c.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
             bail!("cannot read domains - run as root (sudo) or the charm user")
         }
-        Err(e) => return Err(e).context("reading domains"),
-    };
-    let domains: Vec<&str> = content.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    if domains.is_empty() {
-        println!("no domains registered - add one with `charm domain add`");
-        return Ok(());
+        Err(e) => Err(e).context("reading domains"),
     }
-    for d in domains {
-        println!("{d}");
-    }
-    Ok(())
 }
 
 pub fn remove(domain: &str) -> Result<()> {
@@ -68,9 +59,7 @@ pub fn remove(domain: &str) -> Result<()> {
     if list.len() == before {
         bail!("'{domain}' is not registered (see `charm domain list`)");
     }
-    write(&list)?;
-    println!("removed domain: {domain}");
-    Ok(())
+    write(&list)
 }
 
 /// Error unless `host` is, or is a subdomain of, a registered domain.

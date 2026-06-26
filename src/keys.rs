@@ -4,7 +4,6 @@
 
 use anyhow::{bail, Context, Result};
 use std::fs;
-use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 
 use crate::paths;
@@ -19,13 +18,15 @@ fn forced_command_line(key: &str) -> String {
 }
 
 /// Authorize a public key (idempotent; keyed on the key material, so re-adding
-/// the same key even with a different comment is a no-op). Shared by `install`.
-pub fn add(key: &str) -> Result<()> {
+/// the same key even with a different comment is a no-op). Returns a one-line
+/// description of the key. Shared by `install`.
+pub fn add(key: &str) -> Result<String> {
     let key = key.trim();
     let material = match key_material(key) {
         Some(m) => m,
         None => bail!("not an SSH public key (expected e.g. `ssh-ed25519 AAAA... you@host`)"),
     };
+    let desc = describe(&forced_command_line(key));
 
     fs::create_dir_all(paths::ssh_dir())?;
     let _ = fs::set_permissions(paths::ssh_dir(), fs::Permissions::from_mode(0o700));
@@ -33,7 +34,7 @@ pub fn add(key: &str) -> Result<()> {
     let path = paths::authorized_keys();
     let existing = fs::read_to_string(&path).unwrap_or_default();
     if existing.contains(material) {
-        return Ok(());
+        return Ok(desc);
     }
     let mut content = existing;
     if !content.is_empty() && !content.ends_with('\n') {
@@ -44,28 +45,11 @@ pub fn add(key: &str) -> Result<()> {
     fs::write(&path, &content).with_context(|| format!("writing {path}"))?;
     let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
     util::chown_charm(&path);
-    Ok(())
+    Ok(desc)
 }
 
-/// `charm key add [KEY]` - KEY as an argument, or read from stdin if omitted.
-pub fn add_cli(key: Option<String>) -> Result<()> {
-    util::require_root()?;
-    let key = match key {
-        Some(k) => k,
-        None => {
-            let mut s = String::new();
-            std::io::stdin()
-                .read_to_string(&mut s)
-                .context("reading key from stdin")?;
-            s
-        }
-    };
-    add(&key)?;
-    println!("authorized {}", describe(&forced_command_line(key.trim())));
-    Ok(())
-}
-
-pub fn list() -> Result<()> {
+/// Authorized keys as one-line descriptions, in order (index = number - 1).
+pub fn entries() -> Result<Vec<String>> {
     let content = match fs::read_to_string(paths::authorized_keys()) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -73,20 +57,17 @@ pub fn list() -> Result<()> {
         }
         Err(_) => String::new(),
     };
-    let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
-    if lines.is_empty() {
-        println!("no keys authorized - add one with `charm key add`");
-        return Ok(());
-    }
-    for (i, line) in lines.iter().enumerate() {
-        println!("{}. {}", i + 1, describe(line));
-    }
-    Ok(())
+    Ok(content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(describe)
+        .collect())
 }
 
 /// Remove one authorized key by its number (from `key list`). A number is the
 /// only handle: it's unambiguous even with missing or duplicate comments.
-pub fn remove(number: usize) -> Result<()> {
+/// Returns the description of the removed key.
+pub fn remove(number: usize) -> Result<String> {
     util::require_root()?;
     let path = paths::authorized_keys();
     let content = fs::read_to_string(&path).context("reading authorized_keys")?;
@@ -111,8 +92,7 @@ pub fn remove(number: usize) -> Result<()> {
     fs::write(&path, &out).with_context(|| format!("writing {path}"))?;
     let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
     util::chown_charm(&path);
-    println!("removed {removed}");
-    Ok(())
+    Ok(removed)
 }
 
 /// The base64 key material (2nd field), or None if it doesn't look like a key.

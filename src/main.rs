@@ -1,5 +1,6 @@
 mod app;
 mod caddy;
+mod cli;
 mod domains;
 mod doctor;
 mod install;
@@ -156,28 +157,28 @@ fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Install { ssh_key } => install::run(ssh_key.as_deref())?,
         Command::Domain { action } => match action {
-            DomainAction::Add { domain } => domains::add(&domain)?,
-            DomainAction::List => domains::list()?,
-            DomainAction::Remove { domain } => domains::remove(&domain)?,
+            DomainAction::Add { domain } => cli::domain_add(&domain)?,
+            DomainAction::List => cli::domain_list()?,
+            DomainAction::Remove { domain } => cli::domain_remove(&domain)?,
         },
         Command::Key { action } => match action {
-            KeyAction::Add { key } => keys::add_cli(key)?,
-            KeyAction::List => keys::list()?,
-            KeyAction::Remove { number } => keys::remove(number)?,
+            KeyAction::Add { key } => cli::key_add(key)?,
+            KeyAction::List => cli::key_list()?,
+            KeyAction::Remove { number } => cli::key_remove(number)?,
         },
         Command::Uninstall { all, volumes } => uninstall::run(all, volumes)?,
         Command::Shell => shell::run()?,
         Command::Deploy { app, repo, gitref, sha } => app::deploy(&app, &repo, &gitref, &sha)?,
-        Command::Publish { app } => app::publish(&app)?,
-        Command::Unpublish { app } => app::unpublish(&app)?,
-        Command::Sync => app::sync()?,
-        Command::Start { app } => app::start(&app)?,
-        Command::Stop { app } => app::stop(&app)?,
-        Command::Restart { app } => app::restart(&app)?,
-        Command::Rm { app, volumes } => app::rm(&app, volumes)?,
-        Command::List => app::list()?,
-        Command::Status { app } => app::status(&app)?,
-        Command::Logs { app } => app::logs(&app)?,
+        Command::Publish { app } => cli::publish(&app)?,
+        Command::Unpublish { app } => cli::unpublish(&app)?,
+        Command::Sync => cli::sync()?,
+        Command::Start { app } => cli::start(&app)?,
+        Command::Stop { app } => cli::stop(&app)?,
+        Command::Restart { app } => cli::restart(&app)?,
+        Command::Rm { app, volumes } => cli::rm(&app, volumes)?,
+        Command::List => cli::list()?,
+        Command::Status { app } => cli::status(&app)?,
+        Command::Logs { app } => cli::logs(&app)?,
         Command::Doctor => doctor::run()?,
     }
     Ok(())

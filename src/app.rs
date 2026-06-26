@@ -9,10 +9,9 @@
 //! v0 scope: a single `[routes]` entry. Multi-route and zero-downtime swaps
 //! are deferred.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -42,6 +41,58 @@ pub struct AppState {
 enum Plan {
     Dockerfile { host: String, port: u16 },
     Compose { host: String, compose_file: String, service: String, port: u16 },
+}
+
+// --- shared data types (rendered by both the CLI and TUI) -----------------
+
+/// One row of the app list.
+pub struct AppSummary {
+    pub name: String,
+    pub kind: &'static str, // "docker" | "compose"
+    pub host: String,
+    pub ip: String,
+    pub port: u16,
+}
+
+/// Full detail for one app: desired config + live container/route state.
+pub struct AppStatus {
+    pub name: String,
+    pub kind: &'static str,
+    pub host: String,
+    pub ip: String,
+    pub port: u16,
+    pub image: Option<String>,
+    pub container_state: String, // "running" | "exited" | … | "missing"
+    pub routed: bool,
+}
+
+/// The one-word health verdict, computed once in core; each frontend colors it.
+pub enum Health {
+    Healthy,
+    NotRouted,
+    Stopped,
+    Missing,
+}
+
+impl AppStatus {
+    pub fn health(&self) -> Health {
+        if self.container_state == "missing" {
+            Health::Missing
+        } else if self.container_state != "running" {
+            Health::Stopped
+        } else if !self.routed {
+            Health::NotRouted
+        } else {
+            Health::Healthy
+        }
+    }
+}
+
+fn kind_str(rt: &Runtime) -> &'static str {
+    match rt {
+        Runtime::Dockerfile { .. } => "docker",
+        Runtime::Compose { .. } => "compose",
+    }
 }
 
 fn container(app: &str) -> String {
@@ -144,24 +195,19 @@ pub fn publish(app: &str) -> Result<()> {
 
 pub fn unpublish(app: &str) -> Result<()> {
     load_state(app)?; // errors "no deployed app '<app>'" if it doesn't exist
-    caddy::unpublish(app)?;
-    println!("charm: '{app}' removed from the proxy (container left running)");
-    Ok(())
+    caddy::unpublish(app)
 }
 
-pub fn sync() -> Result<()> {
+/// Re-apply every app's route. Returns the names synced.
+pub fn sync() -> Result<Vec<String>> {
     ensure_state_access()?;
-    let apps = list_states();
-    if apps.is_empty() {
-        println!("charm: no apps to sync");
-        return Ok(());
-    }
-    for (app, st) in &apps {
-        caddy::publish(app, &st.host, &st.ip, st.port)
+    let mut synced = Vec::new();
+    for (app, st) in list_states() {
+        caddy::publish(&app, &st.host, &st.ip, st.port)
             .with_context(|| format!("syncing '{app}'"))?;
-        println!("charm: synced '{app}' -> https://{}", st.host);
+        synced.push(app);
     }
-    Ok(())
+    Ok(synced)
 }
 
 // --- container layer (no rebuild) -----------------------------------------
@@ -175,7 +221,6 @@ pub fn stop(app: &str) -> Result<()> {
             run_quiet("docker", &["compose", "-p", &project(app), "-f", compose_file, "stop"])?
         }
     }
-    println!("charm: stopped '{app}' (route removed; image + repo kept)");
     Ok(())
 }
 
@@ -193,9 +238,7 @@ pub fn start(app: &str) -> Result<()> {
             run_quiet("docker", &["compose", "-p", &project(app), "-f", compose_file, "start"])?;
         }
     }
-    caddy::publish(app, &st.host, &st.ip, st.port)?;
-    println!("charm: started '{app}' -> https://{}", st.host);
-    Ok(())
+    caddy::publish(app, &st.host, &st.ip, st.port)
 }
 
 pub fn restart(app: &str) -> Result<()> {
@@ -212,23 +255,23 @@ pub fn restart(app: &str) -> Result<()> {
             run_quiet("docker", &["compose", "-p", &project(app), "-f", compose_file, "restart"])?;
         }
     }
-    caddy::publish(app, &st.host, &st.ip, st.port)?;
-    println!("charm: restarted '{app}'");
-    Ok(())
+    caddy::publish(app, &st.host, &st.ip, st.port)
 }
 
-pub fn logs(app: &str) -> Result<()> {
+/// The `docker …` invocation that streams an app's logs — the frontend runs it
+/// (CLI `exec`s it; the TUI spawns and pipes it).
+pub fn logs_command(app: &str) -> Result<(String, Vec<String>)> {
     let st = load_state(app)?;
-    // exec replaces this process so `-f` streams until the user interrupts.
-    let err = match &st.runtime {
-        Runtime::Dockerfile { .. } => Command::new("docker")
-            .args(["logs", "-f", "--tail", "100", &container(app)])
-            .exec(),
-        Runtime::Compose { compose_file, .. } => Command::new("docker")
-            .args(["compose", "-p", &project(app), "-f", compose_file, "logs", "-f", "--tail", "100"])
-            .exec(),
+    let args: Vec<String> = match &st.runtime {
+        Runtime::Dockerfile { .. } => {
+            ["logs", "-f", "--tail", "100", &container(app)].map(String::from).to_vec()
+        }
+        Runtime::Compose { compose_file, .. } => vec![
+            "compose".into(), "-p".into(), project(app), "-f".into(), compose_file.clone(),
+            "logs".into(), "-f".into(), "--tail".into(), "100".into(),
+        ],
     };
-    Err(anyhow!("failed to exec docker logs: {err}"))
+    Ok(("docker".into(), args))
 }
 
 // --- full lifecycle -------------------------------------------------------
@@ -273,93 +316,43 @@ pub fn rm(app: &str, volumes: bool) -> Result<()> {
     let _ = fs::remove_file(format!("{}/{app}.json", paths::state()));
     let _ = fs::remove_file(format!("{}/{app}.ip", paths::state()));
     let _ = fs::remove_dir_all(format!("{}/{app}", paths::builds()));
-    println!("charm: removed '{app}'");
     Ok(())
 }
 
-pub fn list() -> Result<()> {
+/// All deployed apps, as data (errors if state isn't readable).
+pub fn summaries() -> Result<Vec<AppSummary>> {
     ensure_state_access()?;
-    let apps = list_states();
-    if apps.is_empty() {
-        println!("no apps deployed");
-        return Ok(());
-    }
-    println!(
-        "{}",
-        style::bold(&format!("{:<18} {:<8} {:<28} UPSTREAM", "APP", "KIND", "URL"))
-    );
-    for (app, st) in &apps {
-        let kind = match st.runtime {
-            Runtime::Dockerfile { .. } => "docker",
-            Runtime::Compose { .. } => "compose",
-        };
-        println!(
-            "{app:<18} {kind:<8} {:<28} {}:{}",
-            format!("https://{}", st.host),
-            st.ip,
-            st.port
-        );
-    }
-    Ok(())
+    Ok(list_states()
+        .into_iter()
+        .map(|(name, st)| AppSummary {
+            name,
+            kind: kind_str(&st.runtime),
+            host: st.host,
+            ip: st.ip,
+            port: st.port,
+        })
+        .collect())
 }
 
-pub fn status(app: &str) -> Result<()> {
+/// One app's full status, as data: desired config + live container/route state.
+pub fn status(app: &str) -> Result<AppStatus> {
     let st = load_state(app)?;
-
-    let (kind, image, cstate) = match &st.runtime {
-        Runtime::Dockerfile { image } => {
-            ("docker", Some(image.clone()), docker_status(&container(app)))
-        }
+    let (image, container_state) = match &st.runtime {
+        Runtime::Dockerfile { image } => (Some(image.clone()), docker_status(&container(app))),
         Runtime::Compose { compose_file, service } => {
-            ("compose", None, compose_status(app, compose_file, service))
+            (None, compose_status(app, compose_file, service))
         }
     };
-    let routed = caddy::is_published(app);
-
-    println!("{}", style::bold(app));
-    field("kind", kind);
-    field("url", &format!("https://{}", st.host));
-    field("upstream", &format!("{}:{}", st.ip, st.port));
-    if let Some(image) = &image {
-        field("image", image);
-    }
-    field("container", &color_state(&cstate));
-    field(
-        "route",
-        &if routed {
-            style::green("published")
-        } else {
-            style::red("missing")
-        },
-    );
-
-    println!();
-    println!("{}", verdict(app, &cstate, routed));
-    Ok(())
-}
-
-fn field(label: &str, value: &str) {
-    println!("  {:<10} {value}", label);
-}
-
-fn color_state(s: &str) -> String {
-    match s {
-        "running" => style::green(s),
-        "missing" => style::red(s),
-        other => style::yellow(other),
-    }
-}
-
-fn verdict(app: &str, cstate: &str, routed: bool) -> String {
-    if cstate == "missing" {
-        style::red(&format!("container missing - run `charm start {app}` or redeploy"))
-    } else if cstate != "running" {
-        style::yellow(&format!("stopped - run `charm start {app}`"))
-    } else if !routed {
-        style::yellow("running but not routed - run `charm sync`")
-    } else {
-        style::green("healthy")
-    }
+    Ok(AppStatus {
+        name: app.to_string(),
+        kind: kind_str(&st.runtime),
+        host: st.host,
+        ip: st.ip,
+        port: st.port,
+        image,
+        container_state,
+        routed: caddy::is_published(app),
+    })
 }
 
 /// Container state string ("running" / "exited" / … / "missing").
