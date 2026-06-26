@@ -1,0 +1,19 @@
+[package]
+name = "charm"
+version = "0.1.0"
+edition = "2021"
+description = "git-push-to-deploy for a single VPS"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+shell-words = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+# HTTP + JSON only (no TLS stack) - talks to Caddy's admin API on localhost.
+ureq = { version = "2", default-features = false, features = ["json"] }
+
+[profile.release]
+strip = true
+lto = true

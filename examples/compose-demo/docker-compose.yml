@@ -1,0 +1,9 @@
+# Two-service stack: a public web service + a private redis.
+# Charm attaches only `web` to the proxy; both share the project's own network,
+# so web can still reach redis by name. No ports are published to the host.
+services:
+  web:
+    image: busybox
+    command: ["sh", "-c", "mkdir -p /www && echo '<h1>charm compose demo</h1>' > /www/index.html && httpd -f -p 8080 -h /www"]
+  redis:
+    image: redis:alpine

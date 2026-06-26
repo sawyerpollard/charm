@@ -1,0 +1,61 @@
+# AlmaLinux dev VM for testing Charm — mirrors the production VPS (saw.dog).
+# Brings up its own systemd + Docker daemon + native Caddy, reachable over SSH.
+# Start with: mise run vm-up
+
+images:
+  - location: "https://repo.almalinux.org/almalinux/9/cloud/aarch64/images/AlmaLinux-9-GenericCloud-latest.aarch64.qcow2"
+    arch: "aarch64"
+  - location: "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
+    arch: "x86_64"
+
+cpus: 2
+memory: "4GiB"
+disk: "20GiB"
+
+# The host project dir is mounted read-only; the built binary at
+# target/<triple>/release/charm is read straight from here during `mise run install`.
+mounts:
+  - location: "~"
+    writable: false
+
+# Forward the VM's web ports so apps can be reached from the host browser.
+portForwards:
+  - guestPort: 80
+    hostPort: 8080
+  - guestPort: 443
+    hostPort: 8443
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux
+      # --- Docker (app runtime) ---
+      dnf -y install dnf-plugins-core git
+      dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+      dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      systemctl enable --now docker
+      # --- native Caddy (reverse proxy; admin API on localhost:2019) ---
+      dnf -y install 'dnf-command(copr)'
+      dnf -y copr enable @caddy/caddy
+      dnf -y install caddy
+      systemctl enable --now caddy
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux
+      # Dev-only: make Caddy use its internal CA for ALL certs, so .test domains
+      # get HTTPS without public ACME. One-time, via the admin API — never the
+      # Caddyfile, and not Charm's job (Charm only manages routes).
+      timeout 60 bash -c 'until curl -sf http://127.0.0.1:2019/config/ >/dev/null; do sleep 2; done'
+      curl -fsS -X PUT http://127.0.0.1:2019/config/apps/tls \
+        -H 'Content-Type: application/json' \
+        -d '{"automation":{"policies":[{"issuers":[{"module":"internal"}]}]}}'
+
+probes:
+  - description: "docker and caddy are installed"
+    script: |
+      #!/bin/bash
+      set -eux
+      timeout 120s bash -c "until command -v docker >/dev/null && command -v caddy >/dev/null; do sleep 3; done"
+    hint: "Provisioning (docker + caddy install) did not finish in time."

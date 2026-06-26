@@ -1,0 +1,7 @@
+# Compose app: `compose` selects the file, and the route maps the public host
+# to a service:port inside the stack. `web` stays on its project network (to
+# reach redis) and is also attached to the charm network for the proxy.
+compose = "docker-compose.yml"
+
+[routes]
+"compose-demo" = "web:8080"

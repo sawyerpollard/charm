@@ -1,0 +1,5 @@
+# Minimal app config. No `compose` key → Dockerfile mode.
+# Bare label "demo" expands against the server base domain → demo.charm.test
+# Bare integer → a port; Charm finds the container exposing it.
+[routes]
+"demo" = 8080
