@@ -1,7 +1,9 @@
 mod app;
 mod caddy;
+mod domains;
 mod doctor;
 mod install;
+mod keys;
 mod paths;
 mod shell;
 mod style;
@@ -22,15 +24,25 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Provision this host: create the `charm` user, SSH forced command, the
-    /// `charm` Docker network, and record the install manifest.
+    /// Provision this host: create the `charm` user, SSH forced command, and the
+    /// `charm` Docker network.
     Install {
-        /// Base domain apps are published under (e.g. `saw.dog`).
+        /// Optionally authorize a push key now (the key contents, not a path).
+        /// Otherwise add keys later with `charm key add`.
         #[arg(long)]
-        domain: String,
-        /// Public SSH key authorized to push (the key contents, not a path).
-        #[arg(long)]
-        ssh_key: String,
+        ssh_key: Option<String>,
+    },
+
+    /// Manage the domains apps may be served under.
+    Domain {
+        #[command(subcommand)]
+        action: DomainAction,
+    },
+
+    /// Manage the SSH public keys authorized to push.
+    Key {
+        #[command(subcommand)]
+        action: KeyAction,
     },
 
     /// Remove Charm's control plane. By default leaves deployed apps running;
@@ -116,9 +128,43 @@ enum Command {
     Doctor,
 }
 
+#[derive(Subcommand)]
+enum DomainAction {
+    /// Register a domain (apps may serve hosts under it).
+    Add { domain: String },
+    /// List registered domains.
+    #[command(visible_aliases = ["ls", "list"])]
+    List,
+    /// Unregister a domain.
+    #[command(visible_alias = "rm")]
+    Remove { domain: String },
+}
+
+#[derive(Subcommand)]
+enum KeyAction {
+    /// Authorize a public key (pass the key, or omit to read it from stdin).
+    Add { key: Option<String> },
+    /// List authorized keys.
+    #[command(visible_aliases = ["ls", "list"])]
+    List,
+    /// Remove a key by its number (from `key list`).
+    #[command(visible_alias = "rm")]
+    Remove { number: usize },
+}
+
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
-        Command::Install { domain, ssh_key } => install::run(&domain, &ssh_key)?,
+        Command::Install { ssh_key } => install::run(ssh_key.as_deref())?,
+        Command::Domain { action } => match action {
+            DomainAction::Add { domain } => domains::add(&domain)?,
+            DomainAction::List => domains::list()?,
+            DomainAction::Remove { domain } => domains::remove(&domain)?,
+        },
+        Command::Key { action } => match action {
+            KeyAction::Add { key } => keys::add_cli(key)?,
+            KeyAction::List => keys::list()?,
+            KeyAction::Remove { number } => keys::remove(number)?,
+        },
         Command::Uninstall { all, volumes } => uninstall::run(all, volumes)?,
         Command::Shell => shell::run()?,
         Command::Deploy { app, repo, gitref, sha } => app::deploy(&app, &repo, &gitref, &sha)?,

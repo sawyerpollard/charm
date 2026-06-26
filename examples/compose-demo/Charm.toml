@@ -4,4 +4,4 @@
 compose = "docker-compose.yml"
 
 [routes]
-"compose-demo" = "web:8080"
+"compose-demo.charm.test" = "web:8080"

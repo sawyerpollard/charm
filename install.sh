@@ -35,7 +35,13 @@ echo
 echo "Installed: $(command -v charm)"
 echo
 echo "Next - provision this host (needs git, systemd, Docker, and Caddy):"
-echo "  sudo charm install --domain <your-domain> --ssh-key \"\$(cat ~/.ssh/id_ed25519.pub)\""
+echo "  sudo charm install"
+echo
+echo "Register the domain(s) you'll serve apps under:"
+echo "  sudo charm domain add example.com"
+echo
+echo "Authorize the key you'll push with - your LAPTOP's public key, pasted here:"
+echo "  sudo charm key add \"ssh-ed25519 AAAA... you@laptop\""
 echo
 echo "Then, on your laptop, in an app repo:"
 echo "  git remote add charm charm@<your-server>:my-app && git push charm main"

@@ -67,7 +67,8 @@ depends = ["build", "keygen"]
 run = '''
 bin="$PWD/target/$CHARM_TARGET/release/charm"
 limactl shell $CHARM_VM sudo install -m 0755 "$bin" /usr/bin/charm
-limactl shell $CHARM_VM sudo charm install --domain "$CHARM_DOMAIN" --ssh-key "$(cat "$CHARM_KEY.pub")"
+limactl shell $CHARM_VM sudo charm install --ssh-key "$(cat "$CHARM_KEY.pub")"
+limactl shell $CHARM_VM sudo charm domain add "$CHARM_DOMAIN"
 '''
 
 [tasks.push]

@@ -404,7 +404,6 @@ fn compose_status(app: &str, compose_file: &str, service: &str) -> String {
 
 /// Derive the deploy plan from `Charm.toml` + repo contents.
 fn load_plan(build_dir: &str) -> Result<Plan> {
-    let base = base_domain();
     let path = format!("{build_dir}/Charm.toml");
     let table: toml::Table = if Path::new(&path).exists() {
         toml::from_str(&fs::read_to_string(&path)?).context("parsing Charm.toml")?
@@ -417,7 +416,9 @@ fn load_plan(build_dir: &str) -> Result<Plan> {
         .and_then(|v| v.as_table())
         .context("Charm.toml needs a [routes] table")?;
     let (host_key, value) = routes.iter().next().context("[routes] is empty")?;
-    let host = expand_host(host_key, &base);
+    // Hosts are literal FQDNs (no expansion) and must be under a registered domain.
+    let host = host_key.to_string();
+    crate::domains::ensure_allowed(&host)?;
 
     // Compose if Charm.toml says so, or a compose file is present in the repo.
     let compose_file = table
@@ -483,22 +484,6 @@ fn parse_service_port(s: &str) -> Result<(String, u16)> {
         .with_context(|| format!("expected \"service:port\", got '{s}'"))?;
     let port = port.parse().with_context(|| format!("invalid port in '{s}'"))?;
     Ok((svc.to_string(), port))
-}
-
-fn base_domain() -> String {
-    fs::read_to_string(format!("{}/domain", paths::state()))
-        .unwrap_or_default()
-        .trim()
-        .to_string()
-}
-
-/// Bare label expands against the base domain; a dotted value is a literal FQDN.
-fn expand_host(key: &str, base: &str) -> String {
-    if key.contains('.') {
-        key.to_string()
-    } else {
-        format!("{key}.{base}")
-    }
 }
 
 // --- state (the per-app manifest) -----------------------------------------
